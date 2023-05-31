@@ -1,0 +1,401 @@
+---
+title: "Relationship between article impact and centralities of institutions"
+author: "Aaron Plex"
+date:  "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Uploading data
+
+```{r, message=FALSE, warning=FALSE}
+library(igraph)
+library(readxl)
+library(viridis)
+library(dplyr)
+library(NetIndices)
+
+author.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "Authors_list")
+colnames(author.list)<-c("JournalArticleID","Name","Organization","Country","PredictedGender","GenderAccuracy")
+author.list<-as.data.frame(author.list)
+
+journal.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "JA_list")
+clean.ja.list<-journal.list[,c(1,2,3,10,15,16,17,18,19)]
+colnames(clean.ja.list)<-c("JournalArticleID","Year","Crop","JournalTitle","ResearchArea","ResearchCountry","Commodity","FlagShipName","FlagshipAcronym")
+clean.ja.list<-as.data.frame(clean.ja.list)
+
+# Isolating articles for GLDC
+GLDC<-as_tibble(journal.list)%>%
+  filter(CRP=="GLDC")
+gldc<-author.list[c(6941:10933),]
+
+# Isolating articles for RTB
+RTB<-as_tibble(journal.list)%>%
+  filter(CRP=="RTB")
+rtb<-author.list[c(1:6941),]
+
+```
+
+
+# Generating a graph object for entire GLDC
+
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+#GLDC
+
+matGLDC<-matrix(0,nrow=length(unique(gldc$Organization)),ncol=length(unique(gldc$Organization))) #adjacency matrix of zeros for institutions
+colnames(matGLDC)<-unique(gldc$Organization)
+rownames(matGLDC)<-unique(gldc$Organization)
+dim(matGLDC)
+
+ja.GLDC<-clean.ja.list #filter out GLDC articles
+ja.GLDC<-(ja.GLDC[which(ja.GLDC$JournalArticleID>=722),]) #721 is the last row of RTB articles
+
+dim(ja.GLDC) #430x9
+
+for(k in ja.GLDC$JournalArticleID){
+  vec=gldc$Organization[which(gldc$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matGLDC[which(rownames(matGLDC)==vec[i]),which(rownames(matGLDC)==vec[j])]<-1 #if two institutions collaborate, put a 1 in the adjacency matrix
+    }
+  }
+}
+
+diag(matGLDC)<-0
+
+for(i in 1:dim(matGLDC)[1]){
+  for(j in 1:dim(matGLDC)[1]){
+    if(matGLDC[i,j]>=1){
+      matGLDC[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netGLDC<-graph_from_adjacency_matrix(matGLDC)
+
+```
+
+## Estimating network metrics by institution: GLDC
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+# Node degree
+degreeGLDC <- as.matrix(degree(netGLDC, mode="total"))
+
+# Node betweenness
+betweennessGLDC<-as.matrix(betweenness(netGLDC, v=V(netGLDC), directed = FALSE))
+
+# Eigenvector centrality
+eigenGLDC<-eigen_centrality(netGLDC, directed = FALSE)
+eigenGLDC<-as.matrix(eigenGLDC$vector)
+
+# PageRank centrality
+pageRankGLDC<-page_rank(netGLDC, vids = V(netGLDC), directed = FALSE)
+pageRankGLDC<-as.matrix(pageRankGLDC$vector)
+
+# Joining centralities
+institutionGLDC<-rownames(pageRankGLDC)
+
+GLDCcentralities<-as_tibble(cbind(institutionGLDC, degreeGLDC, betweennessGLDC, eigenGLDC, pageRankGLDC))%>%
+  rename(institution=institutionGLDC,
+         degree=V2,
+         betweenness=V3,
+         eigenvector=V4,
+         pageRank=V5)
+```
+
+
+# Generating a graph object for entire RTB
+
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+#RTB
+
+matRTB<-matrix(0,nrow=length(unique(rtb$Organization)),ncol=length(unique(rtb$Organization))) #adjacency matrix of zeros for institutions
+colnames(matRTB)<-unique(rtb$Organization)
+rownames(matRTB)<-unique(rtb$Organization)
+dim(matRTB)
+
+ja.RTB<-clean.ja.list
+ja.RTB<-(ja.RTB[which(ja.RTB$JournalArticleID<722),]) #721 is the last row of RTB articles
+
+dim(ja.RTB) #837x9
+
+for(k in ja.RTB$JournalArticleID){
+  vec=rtb$Organization[which(rtb$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matRTB[which(rownames(matRTB)==vec[i]),which(rownames(matRTB)==vec[j])]<-1 #if two institutions collaborate, put a 1 in the adjacency matrix
+    }
+  }
+}
+
+diag(matRTB)<-0
+
+for(i in 1:dim(matRTB)[1]){
+  for(j in 1:dim(matRTB)[1]){
+    if(matRTB[i,j]>=1){
+      matRTB[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netRTB<-graph_from_adjacency_matrix(matRTB)
+
+```
+
+## Estimating network metrics by institution: RTB
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+# Node degree
+degreeRTB <- as.matrix(degree(netRTB, mode="total"))
+
+# Node betweenness
+betweennessRTB<-as.matrix(betweenness(netRTB, v=V(netRTB), directed = FALSE))
+
+# Eigenvector centrality
+eigenRTB<-eigen_centrality(netRTB, directed = FALSE)
+eigenRTB<-as.matrix(eigenRTB$vector)
+
+# PageRank centrality
+pageRankRTB<-page_rank(netRTB, vids = V(netRTB), directed = FALSE)
+pageRankRTB<-as.matrix(pageRankRTB$vector)
+
+# Joining centralities
+institutionRTB<-rownames(pageRankRTB)
+
+RTBcentralities<-as_tibble(cbind(institutionRTB, degreeRTB, betweennessRTB, eigenRTB, pageRankRTB))%>%
+  rename(institution=institutionRTB,
+         degree=V2,
+         betweenness=V3,
+         eigenvector=V4,
+         pageRank=V5)
+```
+
+
+## Estimating network metrics by article:
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+# RTB
+authorRTB<-author.list[,c(1,3)]%>%
+  rename(institution=Organization)%>%
+  filter(JournalArticleID<722)%>%
+  group_by(JournalArticleID, institution)%>%
+  summarise(count=1)
+
+author_netricRTB<-merge(authorRTB, RTBcentralities, by="institution")%>%
+  arrange(JournalArticleID)
+article_netricRTB<-author_netricRTB%>%
+  group_by(JournalArticleID)%>%
+  summarise(institutional_size=sum(as.numeric(count)),
+            degreeArt=sum(as.numeric(degree)),
+            betweennessArt=sum(as.numeric(betweenness)),
+            eigenvectorArt=sum(as.numeric(eigenvector)),
+            pageRankArt=sum(as.numeric(pageRank)))
+
+# GLDC
+authorGLDC<-author.list[,c(1,3)]%>%
+  rename(institution=Organization)%>%
+  filter(JournalArticleID>721)%>%
+  group_by(JournalArticleID, institution)%>%
+  summarise(count=1)
+
+author_netricGLDC<-merge(authorGLDC, GLDCcentralities, by="institution")%>%
+  arrange(JournalArticleID)
+article_netricGLDC<-author_netricGLDC%>%
+  group_by(JournalArticleID)%>%
+  summarise(institutional_size=sum(as.numeric(count)),
+            degreeArt=sum(as.numeric(degree)),
+            betweennessArt=sum(as.numeric(betweenness)),
+            eigenvectorArt=sum(as.numeric(eigenvector)),
+            pageRankArt=sum(as.numeric(pageRank)))
+
+## Merging data of RTB and GLDC
+article_metric<-rbind(article_netricRTB, article_netricGLDC)
+
+## Data on Web of Science citations
+WOScitations <- read_excel("Dataset_INA_V19_Only_Citations.xlsx",sheet = "JA_list_citations")
+#WOScitations<-
+
+## Data on Altmetric score
+altmetric_score <- read_excel("Dataset_INA_V20_Only_Altmetric.xlsx",sheet = "JA_list_Altmetric")
+
+## Data on citations
+citation_metric<-merge(WOScitations[,c(1,2,3,10)], 
+                       altmetric_score[,c(1,3)],
+                       by="UID_JA")%>%
+  rename(JournalArticleID="UID_JA",
+         WoScitation="Times_Cited_Only_WoS_Core_Collection",
+         altmetric="Altmetric_Attention_Score")
+
+## Data on article centrality and citations
+citation_centrality<-merge(article_metric,
+                           citation_metric,
+                           by="JournalArticleID")
+
+## Missing values
+citation_centrality[citation_centrality=="NA"]<-c("")
+citation_centrality[citation_centrality=="Na"]<-c("")
+
+## Standardizing ciatations metrics by year
+citation_centrality<-citation_centrality%>%
+  mutate(WoScitation=as.numeric(WoScitation),
+         altmetric=as.numeric(altmetric))%>%
+  group_by(AR_Year)%>%
+  mutate(norm_WoS=WoScitation/mean(WoScitation, na.rm=TRUE),
+         norm_altmetric=altmetric/mean(altmetric, na.rm=TRUE))
+```
+
+
+## Article degree and citations
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+library(ggplot2)
+
+ggplot(data = citation_centrality, 
+       aes(x=degreeArt/institutional_size, 
+           y=norm_WoS/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article degree by institutions",
+       y="Normalized WoS citations",
+       color="Publication year")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=degreeArt/institutional_size, y=norm_altmetric/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method = "glm")+
+  scale_y_log10()+
+  labs(x="Mean article degree by institutions",
+       y="Normalized altmetric score",
+       color="Publication year")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=degreeArt/institutional_size, y=norm_WoS/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article degree by institutions",
+       y="Normalized WoS citations")+
+  theme_bw()
+```
+
+## Article betweenness and citations
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+ggplot(data = citation_centrality, 
+       aes(x=betweennessArt, y=norm_WoS))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Article betweenness by institutions",
+       y="Normalized WoS citations")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=betweennessArt/institutional_size, y=norm_WoS/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article betweenness by institutions",
+       y="Normalized WoS citations")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=betweennessArt, y=norm_altmetric))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Article betweenness by institutions",
+       y="Normalized altmetric score")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=betweennessArt/institutional_size, y=norm_altmetric/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article betweenness by institutions",
+       y="Normalized altmetric score")+
+  theme_bw()
+```
+
+
+## Article eigenvector centrality and citations
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+ggplot(data = citation_centrality, 
+       aes(x=eigenvectorArt/institutional_size, y=norm_altmetric/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method = "glm")+
+  scale_y_log10()+
+  labs(x="Mean article eigenvector by institutions",
+       y="Normalized altmetric score")+
+  theme_bw()
+
+ggplot(data = citation_centrality, 
+       aes(x=eigenvectorArt/institutional_size, y=norm_altmetric/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method = "lm")+
+  scale_y_log10()+
+  labs(x="Mean article eigenvector by institutions",
+       y="Normalized altmetric score")+
+  theme_bw()
+```
+
+
+## Article PageRank centrality and citations
+```{r, message=FALSE, warning=FALSE, fig.height=4, fig.width=4, dpi=200}
+ggplot(data = citation_centrality, 
+       aes(x=pageRankArt/institutional_size, y=norm_WoS/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article PageRank by institutions",
+       y="Normalized WoS citations",
+       color="Publication year")+
+  theme_bw()
+
+
+ggplot(data = citation_centrality, 
+       aes(x=pageRankArt/institutional_size, y=norm_altmetric/institutional_size))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="glm")+
+  scale_y_log10()+
+  labs(x="Mean article PageRank by institutions",
+       y="Normalized altmetric score")+
+  theme_bw()
+```
+
+
+```{r}
+library(GGally)
+## Dataset with unscaled centralities and citations
+ggcorr(citation_centrality[,c(2:6,9,10)])
+## Dataset with unscaled centralities and normalized citations
+ggcorr(citation_centrality[,c(2:6,11,12)])
+```
+
+
+```{r}
+scaled_centrality<-citation_centrality[,c(2:6,11,12)]%>%
+  mutate(degreeArt=degreeArt/institutional_size,
+         betweennessArt=betweennessArt/institutional_size,
+         eigenvectorArt=eigenvectorArt/institutional_size,
+         pageRankArt=pageRankArt/institutional_size,
+         norm_WoS=log10((norm_WoS+1)/institutional_size),
+         norm_altmetric=log10((norm_altmetric+1)/institutional_size))
+
+colnames(scaled_centrality)<-c("Institutions","Degree","Betweenness","Eigenvector","PageRank","WoS","Altmetric")
+```
+
+
+```{r}
+## Dataset with scaled centralities and normalized citations
+ggcorr(scaled_centrality,
+       label = TRUE,
+       label_color = "white",
+       label_alpha = FALSE)+
+  scale_fill_viridis(discrete = FALSE)+
+  labs(fill="Pearson \ncoefficient")
+```
+
+
