@@ -1,0 +1,251 @@
+---
+title: "Coauthors networks for two CGIAR research programs: GLDC and RTB"
+author: "Berea Etherton, Aaron Plex"
+date: "05/31/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data manipulation
+
+```{r, message=FALSE, warning=FALSE}
+library(igraph)
+library(readxl)
+library(tidyverse)
+
+author.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "Authors_list")
+colnames(author.list)<-c("JournalArticleID","Name","Organization","Country","PredictedGender","GenderAccuracy")
+author.list<-as.data.frame(author.list)
+
+journal.list<- read_excel("Dataset_INA_V10 21-09-01.xlsx", sheet = "JA_list")
+clean.ja.list<-journal.list[,c(1,2,3,10,15,16,17,18,19)]
+colnames(clean.ja.list)<-c("JournalArticleID","Year","Crop","JournalTitle","ResearchArea","ResearchCountry","Commodity","FlagShipName","FlagshipCode")
+clean.ja.list<-as.data.frame(clean.ja.list)
+
+# Isollating articles for GLDC
+GLDC<-as_tibble(journal.list)%>%
+  filter(CRP=="GLDC")
+gldc<-author.list[c(6941:10933),]
+
+# Isollating articles for RTB
+RTB<-as_tibble(journal.list)%>%
+  filter(CRP=="RTB")
+rtb<-author.list[c(1:6941),]
+```
+
+
+## Generating a graph object for GLDC
+
+```{r}
+# GLDC 2018 2020----------------------------------------------------------------
+
+matGLDC<-matrix(0,nrow=length(unique(gldc$Name)),ncol=length(unique(gldc$Name))) #adj matrix for authors
+colnames(matGLDC)<-unique(gldc$Name)
+rownames(matGLDC)<-unique(gldc$Name)
+dim(matGLDC)
+
+ja.GLDC<-clean.ja.list 
+ja.GLDC<-(ja.GLDC[which(ja.GLDC$JournalArticleID>=722),]) #721 is the last row of RTB articles
+
+dim(ja.GLDC)
+
+for(k in ja.GLDC$JournalArticleID){
+  vec=gldc$Name[which(gldc$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matGLDC[which(rownames(matGLDC)==vec[i]),which(rownames(matGLDC)==vec[j])]<-1 #if two scientists co-authored, put a 1 in the adj matrix
+    }
+  }
+}
+
+diag(matGLDC)<-0
+
+for(i in 1:dim(matGLDC)[1]){
+  for(j in 1:dim(matGLDC)[1]){
+    if(matGLDC[i,j]>=1){
+      matGLDC[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netGLDC<-graph_from_adjacency_matrix(matGLDC)
+degGLDC <- degree(netGLDC, mode="total") 
+
+genderGLDC<-matrix(0,nrow=dim(matGLDC)[1],ncol=1)
+for(i in 1:dim(matGLDC)[1]){
+  genderGLDC[i]<-gldc$PredictedGender[which(gldc$Name==rownames(matGLDC)[i])[1]]
+}
+
+V(netGLDC)$name<-rownames(matGLDC)
+```
+
+## Network metrics of authors: GLDC
+```{r, message=FALSE}
+## Node degree of authors
+degree_GLDC<-as.data.frame(degGLDC) %>%
+  arrange(desc(degGLDC))%>%
+  mutate(cum_degree=cumsum(degGLDC)/sum(degGLDC)*100)
+head(degree_GLDC)
+
+## Betweenness centrality of authors
+bet_GLDC<-betweenness(netGLDC, v = V(netGLDC), directed = FALSE)
+betweenness_GLDC<-as.data.frame(bet_GLDC)%>%
+  arrange(desc(bet_GLDC))%>%
+  mutate(cum_betweenness=cumsum(bet_GLDC)/sum(bet_GLDC)*100)
+head(betweenness_GLDC)
+```
+
+
+## Coauthor network for GLDC during 2018-2020
+
+```{r, fig.width=14.5, fig.height=17, dpi=100}
+library(ggraph)
+library(ggplot2)
+#library(RColorBrewer)
+
+graphDLDC <- ggraph(netGLDC, "stress",bbox = 15)+
+  geom_edge_link(edge_width=0.15,
+                 colour="#b3b3b3")+
+  geom_node_point(aes(fill = genderGLDC,
+                      colour = genderGLDC,
+                      size = degGLDC), 
+                  shape = 21, show.legend = TRUE)+
+  scale_size_continuous(range = c(2,7))+
+  scale_fill_manual(values = c("male" = "#5AAEAD",
+                               "female" = "#E95E47",
+                               "NA" = "#FFFFBF"))+
+  scale_color_manual(values = c("male" = "#5AAEAD",
+                               "female" = "#E95E47",
+                               "NA" = "#FFFFBF"))+
+  geom_node_text(aes(label = ifelse(degGLDC>150,V(netGLDC)$name,NA)), size=log10(degGLDC)*3, repel = TRUE)+
+  theme(legend.colour = element_blank())+
+  theme_void()
+graphDLDC+
+  guides(fill = guide_legend(title = "Gender",
+                             title.position = "top",
+                             override.aes = list(size = 10),
+                             title.theme = element_text(size = 15),
+                             label.theme = element_text(size = 15)),
+         color = guide_legend(title = "Gender",
+                             title.position = "top",
+                             override.aes = list(size = 10, color = "black"),
+                             title.theme = element_text(size = 15),
+                             label.theme = element_text(size = 15)),
+         size = guide_legend(title = "Node degree", 
+                                title.theme = element_text(size = 15), 
+                                label.theme = element_text(size = 15))
+         )+
+  theme(legend.position = c(0.9,0.41))
+```
+
+
+
+## Generating a graph object for RTB
+```{r}
+# RTB 2017 2020----------------------------------------------------------------
+
+matRTB<-matrix(0,nrow=length(unique(rtb$Name)),ncol=length(unique(rtb$Name))) #adj matrix for authors
+colnames(matRTB)<-unique(rtb$Name)
+rownames(matRTB)<-unique(rtb$Name)
+dim(matRTB)
+
+ja.RTB<-clean.ja.list 
+ja.RTB<-(ja.RTB[which(ja.RTB$JournalArticleID<722),]) #721 is the last row of RTB articles
+
+dim(ja.RTB)
+
+for(k in ja.RTB$JournalArticleID){
+  vec=rtb$Name[which(rtb$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matRTB[which(rownames(matRTB)==vec[i]),which(rownames(matRTB)==vec[j])]<-1 #if two scientists co-authored at least one article, put a 1 in the adj matrix
+    }
+  }
+}
+
+diag(matRTB)<-0
+
+for(i in 1:dim(matRTB)[1]){
+  for(j in 1:dim(matRTB)[1]){
+    if(matRTB[i,j]>=1){
+      matRTB[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netRTB<-graph_from_adjacency_matrix(matRTB)
+degRTB <- degree(netRTB, mode="total") 
+
+bet_RTB<-betweenness(netRTB, v = V(netRTB), directed = FALSE)
+
+genderRTB<-matrix(0,nrow=dim(matRTB)[1],ncol=1)
+for(i in 1:dim(matRTB)[1]){
+  genderRTB[i]<-rtb$PredictedGender[which(rtb$Name==rownames(matRTB)[i])[1]]
+}
+
+V(netRTB)$name<-rownames(matRTB)
+```
+
+
+## Coauthor network RTB 2017-2020
+```{r, fig.width=14.5, fig.height=17, dpi=200}
+graphRTB <- ggraph(netRTB, "stress",bbox = 15)+
+  geom_edge_link(edge_width=0.15,
+                 colour="#b3b3b3")+
+  geom_node_point(aes(fill = genderRTB,
+                      colour = genderRTB,
+                      size = degRTB), 
+                  shape = 21, show.legend = TRUE)+
+  scale_size_continuous(range = c(2,7))+
+  scale_fill_manual(values = c("male" = "#5AAEAD",
+                               "female" = "#E95E47",
+                               "NA" = "#FFFFBF"))+
+  scale_color_manual(values = c("male" = "#5AAEAD",
+                               "female" = "#E95E47",
+                               "NA" = "#FFFFBF"))+
+  geom_node_text(aes(label = ifelse(degRTB>100,V(netRTB)$name,NA)), size=log10(degRTB)*3, repel = TRUE)+
+  theme(legend.colour = element_blank())+
+  theme_void()
+
+graphRTB+
+  guides(fill = guide_legend(title = "Gender",
+                             title.position = "top",
+                             override.aes = list(size = 10),
+                             title.theme = element_text(size = 15),
+                             label.theme = element_text(size = 15)),
+         color = guide_legend(title = "Gender",
+                             title.position = "top",
+                             override.aes = list(size = 10, color = "black"),
+                             title.theme = element_text(size = 15),
+                             label.theme = element_text(size = 15)),
+         size = guide_legend(title = "Node degree", 
+                                title.theme = element_text(size = 15), 
+                                label.theme = element_text(size = 15))
+         )+
+  theme(legend.position = c(0.05,0.5))
+```
+
+
+
+```{r}
+centGLDC<-as_tibble(cbind(degGLDC, bet_GLDC))
+ggplot(data = centGLDC,aes(x=degGLDC, y=bet_GLDC))+
+  geom_jitter(color="grey66")+
+  geom_smooth(color = "darkred", se = FALSE, method = "lm")+
+  scale_x_log10()+
+  scale_y_log10()+
+  theme_classic()
+centRTB<-as_tibble(cbind(degRTB, bet_RTB))
+ggplot(data = centRTB,aes(x=degRTB, y=bet_RTB))+
+  geom_jitter(color="grey66")+
+  geom_smooth(color = "darkred", se = FALSE, method = "lm")+
+  scale_x_log10()+
+  scale_y_log10()+
+  theme_classic()
+```
+
+
+
