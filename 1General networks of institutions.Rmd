@@ -1,0 +1,425 @@
+---
+title: "General organization networks"
+author: "Aaron Plex"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 2
+    toc_float: TRUE
+    number_sections: TRUE
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Network of institutions GLDC
+
+```{r, message=FALSE, warning=FALSE}
+library(igraph)
+library(readxl)
+library(viridis)
+library(tidyverse)
+
+author.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "Authors_list")
+colnames(author.list)<-c("JournalArticleID","Name","Organization","Country","PredictedGender","GenderAccuracy")
+author.list<-as.data.frame(author.list)
+
+journal.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "JA_list")
+clean.ja.list<-journal.list[,c(1,2,3,10,15,16,17,18,19)]
+colnames(clean.ja.list)<-c("JournalArticleID","Year","Crop","JournalTitle","ResearchArea","ResearchCountry","Commodity","FlagShipName","FlagshipAcronym")
+clean.ja.list<-as.data.frame(clean.ja.list)
+
+# Isolating articles for GLDC
+GLDC<-as_tibble(journal.list)%>%
+  filter(CRP=="GLDC")
+gldc<-author.list[c(6941:10933),]
+
+# Isolating articles for RTB
+RTB<-as_tibble(journal.list)%>%
+  filter(CRP=="RTB")
+rtb<-author.list[c(1:6941),]
+
+```
+
+
+# Generating a graph object for entire GLDC
+
+```{r}
+#GLDC
+
+matGLDC<-matrix(0,nrow=length(unique(gldc$Organization)),ncol=length(unique(gldc$Organization))) #adjacency matrix of zeros for institutions
+colnames(matGLDC)<-unique(gldc$Organization)
+rownames(matGLDC)<-unique(gldc$Organization)
+dim(matGLDC)
+
+ja.GLDC<-clean.ja.list
+ja.GLDC<-(ja.GLDC[which(ja.GLDC$JournalArticleID>=722),]) #721 is the last row of RTB articles
+
+dim(ja.GLDC)
+
+for(k in ja.GLDC$JournalArticleID){
+  vec=gldc$Organization[which(gldc$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matGLDC[which(rownames(matGLDC)==vec[i]),which(rownames(matGLDC)==vec[j])]<-1 #if two organizations collaborate, put a 1 in the adjacency matrix
+    }
+  }
+}
+
+diag(matGLDC)<-0
+
+for(i in 1:dim(matGLDC)[1]){
+  for(j in 1:dim(matGLDC)[1]){
+    if(matGLDC[i,j]>=1){
+      matGLDC[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netGLDC<-graph_from_adjacency_matrix(matGLDC)
+degGLDC <- degree(netGLDC, mode="total")
+
+#hist(degGLDC)
+
+V(netGLDC)$Organization<-rownames(matGLDC)
+```
+
+
+## Identifying collaboration with CGIAR centers for GLDC
+```{r}
+edgelist_GLDC<-as_tibble(get.edgelist(netGLDC)) %>%
+   mutate(region1 = ifelse(V1 == "Alliance Biovers Int & CIAT", 1, 0),
+         region2 = ifelse(V1 == "Biovers Int", 1, 0),
+         region3 = ifelse(V1 == "CIAT", 1, 0),
+         region4 = ifelse(V1 == "ICARDA", 1, 0),
+         region5 = ifelse(V1 == "ICRAF", 1, 0),
+         region6 = ifelse(V1 == "ICRISAT", 1, 0),
+         region7 = ifelse(V1 == "IITA", 1, 0),
+         region8 = ifelse(V1 == "ILRI", 1, 0),
+         region9 = ifelse(V1 == "CIRAD", 1, 0),
+         region10 = ifelse(V1 == "CSIRO", 1, 0),
+         region11 = ifelse(V1 == "IRD", 1, 0),
+         region12 = ifelse(V2 == "Alliance Biovers Int & CIAT", 1, 0),
+         region13 = ifelse(V2 == "Biovers Int", 1, 0),
+         region14 = ifelse(V2 == "CIAT", 1, 0),
+         region15 = ifelse(V2 == "ICARDA", 1, 0),
+         region16 = ifelse(V2 == "ICRAF", 1, 0),
+         region17 = ifelse(V2 == "ICRISAT", 1, 0),
+         region18 = ifelse(V2 == "IITA", 1, 0),
+         region19 = ifelse(V2 == "ILRI", 1, 0),
+         region20 = ifelse(V2 == "CIRAD", 1, 0),
+         region21 = ifelse(V2 == "CSIRO", 1, 0),
+         region22 = ifelse(V2 == "IRD", 1, 0),
+         region = region1+region2+region3+region4+region5+region6+region7+region8+region9+region10+region11+region12+region13+region14+region15+region16+region17+region18+region19+region20+region21+region22,
+         Region = ifelse(region >= 1, "CG center", "Other center")) %>%
+  dplyr::select(V1, V2, Region)
+
+nodelist_GLDC<-data.frame(unique(c(edgelist_GLDC$V1, edgelist_GLDC$V2))) 
+colnames(nodelist_GLDC)<-c("V1")
+
+
+nodelist_GLDC<-nodelist_GLDC%>%
+  mutate(region1 = ifelse(V1 == "Alliance Biovers Int & CIAT", 1, 0),
+         region2 = ifelse(V1 == "Biovers Int", 1, 0),
+         region3 = ifelse(V1 == "CIAT", 1, 0),
+         region4 = ifelse(V1 == "ICARDA", 1, 0),
+         region5 = ifelse(V1 == "ICRAF", 1, 0),
+         region6 = ifelse(V1 == "ICRISAT", 1, 0),
+         region7 = ifelse(V1 == "IITA", 1, 0),
+         region8 = ifelse(V1 == "ILRI", 1, 0),
+         region9 = ifelse(V1 == "CIRAD", 1, 0),
+         region10 = ifelse(V1 == "CSIRO", 1, 0),
+         region11 = ifelse(V1 == "IRD", 1, 0),
+         region = region1+region2+region3+region4+region5+region6+region7+region8+region9+region10+region11,
+         Region = ifelse(region >= 1, "CG center", "Other center")) %>%
+  dplyr::select(V1, Region)%>%
+  rename(Center_abbreviation=V1)
+
+# Institutions categories
+partner_listGLDC<-read_excel("Partners_list_GLDC_RTB.xlsx", sheet = "GLDC - Partners")
+
+nodelist_GLDC<-merge(nodelist_GLDC, partner_listGLDC, by="Center_abbreviation", all.x = TRUE)%>%
+  replace_na(list(Status="Collaborator"))
+
+new_GLDC<-graph_from_data_frame(d=edgelist_GLDC,
+                                vertices = nodelist_GLDC,
+                                directed = FALSE)
+
+new_deg<-degree(new_GLDC)
+new_betweenness<-betweenness(new_GLDC, v = V(new_GLDC))
+```
+
+
+
+# Network of institutional collaborations in the GLDC research program
+
+```{r, fig.width=12, fig.height=15, dpi=300}
+library(ggraph)
+library(dplyr)
+
+betweenness_GLDC <- igraph::betweenness(netGLDC, v = V(netGLDC), directed = FALSE, weights = E(netGLDC)$weight)
+
+organization_GLDC<-ggraph(netGLDC, "stress",bbox = 5)+
+  geom_edge_link(edge_width=0.1, colour="grey66")+
+  geom_node_point(aes(fill = degGLDC,
+                      colour = degGLDC,
+                      size = betweenness_GLDC), 
+                  shape = 21, show.legend = FALSE)+
+  scale_edge_width_continuous(range = c(0.005,0.5))+
+  scale_size_continuous(range = c(3,10))+
+  scale_fill_viridis_c(name="Degree", option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  scale_color_viridis_c(option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  geom_node_text(aes(label = ifelse(degGLDC>75,rownames(as.matrix(degGLDC)),NA)), size=5, repel = TRUE)+
+  
+  theme(legend.colour = element_blank())+
+  theme_void()
+  
+organization_GLDC + 
+  ggtitle("GLDC") +
+  theme(plot.title = element_text(colour = "#000066",
+                                  size = 20,
+                                  face = "bold.italic",
+                                  hjust = c(0.5)))
+```
+
+
+
+```{r, , fig.width=10, fig.height=13, dpi=400}
+institution_GLDC<-ggraph(new_GLDC, "stress",bbox = 5)+
+  geom_edge_link(aes(colour=edgelist_GLDC$Region), edge_width=0.2)+
+  geom_node_point(aes(fill = new_deg,
+                      colour = new_deg,
+                      size = new_betweenness, 
+                      shape = Status),
+                  show.legend = TRUE)+
+  scale_shape_manual(values = c("Collaborator"=19,"Program participant"=17,"Planning partner"=15))+
+  scale_edge_color_viridis(discrete = TRUE, option = "rocket", begin = 0.4, end = 0.9)+
+  scale_edge_width_continuous(range = c(0.005,0.5))+
+  scale_size_continuous(range = c(3,10))+
+  scale_fill_viridis_c(name="Degree", option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  scale_color_viridis_c(option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  geom_node_text(aes(label = ifelse(new_deg>75,rownames(as.matrix(new_deg)),NA)), size=4, repel = TRUE)+
+  theme(legend.colour = element_blank())+
+  theme_void()
+  
+institution_GLDC + 
+  ggtitle("GLDC") +
+  theme(plot.title = element_text(colour = "#000066",
+                                  size = 20,
+                                  face = "bold.italic",
+                                  hjust = c(0.5)))+
+  guides(fill=guide_legend(title = "Node degree"),
+         color=guide_legend(title = "Node degree",
+                           override.aes = list(size=7)),
+         size=guide_legend(title = "Betweenness"),
+         shape=guide_legend(title = "Institution type",
+                           override.aes = list(size=5)),
+          edge_color=guide_legend(title = "Center type",
+                           override.aes = list(size=3)))
+
+```
+
+
+# Generating a graph object for entire RTB
+
+```{r}
+#RTB
+
+matRTB<-matrix(0,nrow=length(unique(rtb$Organization)),ncol=length(unique(rtb$Organization))) #adjacency matrix of zeros for institutions
+colnames(matRTB)<-unique(rtb$Organization)
+rownames(matRTB)<-unique(rtb$Organization)
+dim(matRTB)
+
+ja.RTB<-clean.ja.list 
+ja.RTB<-(ja.RTB[which(ja.RTB$JournalArticleID<722),]) 
+
+dim(ja.RTB)
+
+for(k in ja.RTB$JournalArticleID){
+  vec=rtb$Organization[which(rtb$JournalArticleID==k)]
+  for(i in 1:length(vec)){
+    for(j in 1:length(vec)){
+      matRTB[which(rownames(matRTB)==vec[i]),which(rownames(matRTB)==vec[j])]<-1 #if two organizations collaborate, put a 1 in the adjacency matrix
+    }
+  }
+}
+
+diag(matRTB)<-0
+
+for(i in 1:dim(matRTB)[1]){
+  for(j in 1:dim(matRTB)[1]){
+    if(matRTB[i,j]>=1){
+      matRTB[j,i]<-0 #remove loops
+    }
+  }
+}
+
+netRTB<-graph_from_adjacency_matrix(matRTB)
+degRTB <- degree(netRTB, mode="total")
+
+#hist(degRTB)
+
+V(netRTB)$Organization<-rownames(matRTB)
+```
+
+
+## Identifying collaboration with CGIAR centers for RTB
+```{r}
+edgelist_RTB<-as_tibble(get.edgelist(netRTB)) %>%
+   mutate(region1 = ifelse(V1 == "Alliance Biovers Int & CIAT", 1, 0),
+         region2 = ifelse(V1 == "Biovers Int", 1, 0),
+         region3 = ifelse(V1 == "CIAT", 1, 0),
+         region4 = ifelse(V1 == "CIP", 1, 0),
+         region5 = ifelse(V1 == "IITA", 1, 0),
+         region6 = ifelse(V1 == "CIRAD", 1, 0),
+         region7 = ifelse(V2 == "Alliance Biovers Int & CIAT", 1, 0),
+         region8 = ifelse(V2 == "Biovers Int", 1, 0),
+         region9 = ifelse(V2 == "CIAT", 1, 0),
+         region10 = ifelse(V2 == "CIP", 1, 0),
+         region11 = ifelse(V2 == "IITA", 1, 0),
+         region12 = ifelse(V2 == "CIRAD", 1, 0),
+         region = region1+region2+region3+region4+region5+region6+region7+region8+region9+region10+region11+region12,
+         Region = ifelse(region >= 1, "CG center", "Other center")) %>%
+  dplyr::select(V1, V2, Region)
+
+nodelist_RTB<-data.frame(unique(c(edgelist_RTB$V1, edgelist_RTB$V2))) 
+colnames(nodelist_RTB)<-c("V1")
+
+
+nodelist_RTB<-nodelist_RTB%>%
+  mutate(region1 = ifelse(V1 == "Alliance Biovers Int & CIAT", 1, 0),
+         region2 = ifelse(V1 == "Biovers Int", 1, 0),
+         region3 = ifelse(V1 == "CIAT", 1, 0),
+         region4 = ifelse(V1 == "CIP", 1, 0),
+         region5 = ifelse(V1 == "IITA", 1, 0),
+         region6 = ifelse(V1 == "CIRAD", 1, 0),
+         region = region1+region2+region3+region4+region5+region6,
+         Region = ifelse(region >= 1, "CG center", "Other center")) %>%
+  dplyr::select(V1, Region)%>%
+  rename(Center_abbreviation=V1)
+
+# Institutions categories
+partner_listRTB<-read_excel("Partners_list_GLDC_RTB.xlsx", sheet = "RTB - Partners")
+nodelist_RTB<-merge(nodelist_RTB, partner_listRTB, by="Center_abbreviation", all.x = TRUE)%>%
+  replace_na(list(Status="Collaborator"))
+
+
+new_RTB<-graph_from_data_frame(d=edgelist_RTB,
+                                vertices = nodelist_RTB,
+                                directed = FALSE)
+
+new_degRTB<-degree(new_RTB)
+new_betweennessRTB<-betweenness(new_RTB, v = V(new_RTB))
+```
+
+
+# Network of institutional collaborations in RTB research programs
+
+```{r, fig.width=12, fig.height=15, dpi=300}
+
+betweenness_RTB <- igraph::betweenness(netRTB, v = V(netRTB), directed = FALSE, weights = E(netRTB)$weight)
+
+organization_RTB<-ggraph(netRTB, "stress",bbox = 5)+
+  geom_edge_link(edge_width=0.1, colour="grey66")+
+  geom_node_point(aes(fill = degRTB,
+                      colour = degRTB,
+                      size = betweenness_RTB), 
+                  shape = 21, show.legend = FALSE)+
+  scale_edge_width_continuous(range = c(0.005,0.5))+
+  scale_size_continuous(range = c(3,10))+
+  scale_fill_viridis_c(name="Degree", option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  scale_color_viridis_c(option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  geom_node_text(aes(label = ifelse(degRTB>75,rownames(as.matrix(degRTB)),NA)), size=5, repel = TRUE)+
+  
+  theme(legend.colour = element_blank())+
+  theme_void()
+
+organization_RTB + 
+  ggtitle("RTB") +
+  theme(plot.title = element_text(colour = "#000066",
+                                  size = 20,
+                                  face = "bold.italic",
+                                  hjust = c(0.5)))
+```
+
+
+```{r, , fig.width=12, fig.height=15, dpi=400}
+institution_RTB<-ggraph(new_RTB, "stress",bbox = 5)+
+  geom_edge_link(aes(color=edgelist_RTB$Region), edge_width=0.2)+
+  geom_node_point(aes(fill = new_degRTB,
+                      colour = new_degRTB,
+                      size = new_betweennessRTB, 
+                      shape = Status),
+                  show.legend = TRUE)+
+  scale_shape_manual(values = c("Collaborator"=19,"Program participant"=17,"Planning partner"=15))+
+  scale_edge_color_viridis(discrete = TRUE, option = "rocket", begin = 0.4, end = 0.9)+
+  scale_edge_width_continuous(range = c(0.005,0.5))+
+  scale_size_continuous(range = c(3,10))+
+  scale_fill_viridis_c(name="Degree", option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  scale_color_viridis_c(option = "viridis", direction = -1, begin = 0.3, end = 0.9)+
+  geom_node_text(aes(label = ifelse(new_degRTB>75,rownames(as.matrix(new_degRTB)),NA)), size=5, repel = TRUE)+
+  
+  theme(legend.colour = element_blank())+
+  theme_void()
+  
+institution_RTB + 
+  ggtitle("RTB") +
+  theme(plot.title = element_text(colour = "#000066",
+                                  size = 20,
+                                  face = "bold.italic",
+                                  hjust = c(0.5)))+
+  guides(fill=guide_legend(title = "Node degree"),
+         color=guide_legend(title = "Node degree",
+                           override.aes = list(size=7)),
+         size=guide_legend(title = "Betweenness"),
+         shape=guide_legend(title = "Institution type",
+                           override.aes = list(size=5)),
+         edge_color=guide_legend(title = "Center type",
+                           override.aes = list(size=3)))
+
+```
+
+
+```{r, fig.height=5,fig.width=5}
+teams<-author.list%>%
+#  filter(JournalArticleID>721)%>%
+  group_by(JournalArticleID)%>%
+  summarise(team_size=length(Name))
+team_distribution<-teams%>%
+  group_by(team_size)%>%
+  summarise(count=length(JournalArticleID))%>%
+  mutate(density=count/sum(count))
+total=sum(team_distribution$count)
+
+ggplot(data = team_distribution,aes(x=team_size,y=count/total))+
+  geom_smooth(color="red")+
+  geom_vline(xintercept=mean(teams$team_size),size=1)+
+  geom_point()+
+  scale_x_log10()+
+  scale_y_log10()+
+  theme()
+mean(teams$team_size)
+```
+
+
+```{r}
+CGRTB_collaboration<-edgelist_RTB%>%
+  group_by(Region)%>%
+  summarise(count=length(Region))%>%
+  mutate(proportion=count/sum(count))
+CGRTB_collaboration
+
+CGGLDC_collaboration<-edgelist_GLDC%>%
+  group_by(Region)%>%
+  summarise(count=length(Region))%>%
+  mutate(proportion=count/sum(count))
+CGGLDC_collaboration
+```
+
+
+
+Most articles included scientific teams of 6 researchers, and mean team size is 9.88 (~10) researchers.
