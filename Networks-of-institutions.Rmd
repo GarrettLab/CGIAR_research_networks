@@ -1,5 +1,5 @@
 ---
-title: "General organization networks"
+title: "Research collaboration networks for CGIAR research programs on GLDC and RTB"
 author: "Aaron Plex"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 
