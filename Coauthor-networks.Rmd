@@ -1,7 +1,7 @@
 ---
 title: "Coauthors networks for two CGIAR research programs: GLDC and RTB"
 author: "Berea Etherton, Aaron Plex"
-date: "05/31/2023"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
