@@ -1,0 +1,277 @@
+---
+title: "Predicting Altmetric scores with machine learning models: Linear regression"
+author: "Aaron Plex"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Tidyng data
+```{r, message=FALSE, warning=FALSE}
+library(readxl)
+library(viridis)
+library(dplyr)
+library(tidyverse)
+
+journal.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "JA_list")
+author.list<- read_excel("Dataset_INA_V10 21-09-01.xlsx", sheet = "Authors_list")
+WOScitations <- read_excel("Dataset_INA_V19_Only_Citations.xlsx",sheet = "JA_list_citations")
+altmetric_score <- read_excel("Dataset_INA_V20_Only_Altmetric.xlsx",sheet = "JA_list_Altmetric")
+```
+
+
+```{r}
+#Summarizing journal list
+
+journalist<-as_tibble(journal.list)%>%
+  #Selecting which variables to use
+  select(UID_JA, AR_Year, CRP, OA, Language, 
+         Research_Areas, Research_Country, Commodity,
+         Flagship_Acronym, Cluster_of_Activity_Acronym) %>%
+  #Renaming long names of variables
+  rename(CAA= Cluster_of_Activity_Acronym) %>%
+  #Separating observations with multiple categories,
+  #for example, if an article included two commodities
+  mutate(Research_Areas=strsplit(Research_Areas,","))%>%
+  unnest(Research_Areas)%>%
+  mutate(Research_Country=strsplit(Research_Country,","))%>%
+  unnest(Research_Country)%>%
+  mutate(Commodity=strsplit(Commodity,","))%>%
+  unnest(Commodity)%>%
+  mutate(Flagship_Acronym=strsplit(Flagship_Acronym,","))%>%
+  unnest(Flagship_Acronym)%>%
+  mutate(CAA=strsplit(CAA,","))%>%
+  unnest(CAA)
+
+#Calculating diversity on variables if possible:
+area_diversity<-journalist%>%
+  group_by(UID_JA)%>%
+  summarise(area_diversity=length(unique(Research_Areas)))
+country_diversity<-journalist%>%
+  group_by(UID_JA)%>%
+  summarise(country_diversity=ifelse(Research_Country=="Global",20,length(unique(Research_Country))))
+commodity_diversity<-journalist%>%
+  group_by(UID_JA)%>%
+  summarise(commodity_diversity=length(unique(Commodity)))
+flagship_diversity<-journalist%>%
+  group_by(UID_JA)%>%
+  summarise(flagship_diversity=length(unique(Flagship_Acronym)))
+activity_diversity<-journalist%>%
+  group_by(UID_JA)%>%
+  summarise(activity_diversity=length(unique(CAA)))  
+
+#Putting together journal list aspects
+journal_aspects<-merge(journalist, area_diversity,
+                       by = 'UID_JA', all.x = TRUE)
+journal_aspects<-merge(journal_aspects, country_diversity,
+                       by = 'UID_JA', all.x = TRUE)
+journal_aspects<-merge(journal_aspects, commodity_diversity,
+                       by = 'UID_JA', all.x = TRUE)
+journal_aspects<-merge(journal_aspects, flagship_diversity,
+                       by = 'UID_JA', all.x = TRUE)
+journal_aspects<-merge(journal_aspects, activity_diversity,
+                       by = 'UID_JA', all.x = TRUE)
+```
+
+
+```{r}
+#Summarizing author list
+
+authorlist<-as_tibble(author.list)%>%
+  select(-Gender_API_accuracy)%>%
+  rename(predicted_gender=Gender_API_prediction,
+         affiliation_country=`Country Organisation`)%>%
+  group_by(UID_JA)%>%
+  summarise(team_size=length(Author_Name),
+            institutional_diversity=length(unique(Organisation_Author)),
+            geographic_diversity=length(unique(affiliation_country)))
+
+#Calculating aspects on variables of author list if possible:
+author_journal<-merge(author.list[,c(1,4)],
+                      journalist[,c(1,7)])
+helicopter<-as_tibble(author_journal)%>%
+  mutate(rationale = ifelse(Research_Country==`Country Organisation`,1,0))%>%
+  group_by(UID_JA)%>%
+  #Number of local collaborations among the all interactions between country focus of research and country of affiliation
+  summarise(local_collaboration=sum(rationale),
+  #Which proportion of collaborations are non local
+            helicopter_index=1-local_collaboration/length(UID_JA))
+
+gender_index<-as_tibble(author.list)%>%
+  mutate(rationale = ifelse(Gender_API_prediction=="female",1,0))%>%
+  group_by(UID_JA)%>%
+  summarise(female=sum(rationale),
+            gender_index=female/length(UID_JA))
+
+#Joining all aspects of author list
+author_aspects<-merge(authorlist, helicopter,
+                      by = 'UID_JA', all.x = TRUE)
+author_aspects<-merge(author_aspects, gender_index,
+                      by = 'UID_JA', all.x = TRUE)
+```
+
+
+```{r}
+#Merging author aspects with journal aspects
+author_journal_aspect<-merge(journal_aspects, author_aspects,
+                             by = 'UID_JA', all.x = TRUE)
+
+#Merging aspect of articles with citation metrics
+#And asigning no available observations
+AltCG_dataset<-merge(author_journal_aspect, altmetric_score[,c(1,3)],
+                  by = 'UID_JA', all.x = TRUE)
+AltCG_dataset[AltCG_dataset == c("NA")] <- NA
+AltCG_dataset<-AltCG_dataset%>%
+  rename(altmetric_score=Altmetric_Attention_Score)%>%
+  mutate(altmetric_score=as.numeric(altmetric_score))%>%
+  filter(is.na(altmetric_score)==FALSE)%>%
+  select(-UID_JA)
+WoSCG_dataset<-merge(author_journal_aspect, WOScitations[,c(1,10)],
+                     by = 'UID_JA', all.x = TRUE)
+WoSCG_dataset[WoSCG_dataset == c("NA")] <- NA
+WoSCG_dataset<-WoSCG_dataset%>%
+  rename(WoScitation=Times_Cited_Only_WoS_Core_Collection)%>%
+  mutate(WoScitation=log10(as.numeric(WoScitation)+1))%>%
+  filter(is.na(WoScitation)==FALSE)%>%
+  select(-UID_JA)
+```
+
+
+## Plotting the relationship between variables
+```{r,fig.height=8,fig.width=10, warning=FALSE, dpi=300, message=FALSE}
+library(mlr)
+
+#Selecting only continuous variables
+AltCGcont<-AltCG_dataset[,c(1,10:22)]%>%
+  mutate_all(as.numeric)%>%
+  filter(AR_Year!=2021)%>%
+  mutate(altmetric_score=altmetric_score)
+
+AltCG_untidy<-gather(AltCGcont, key = "Variable",
+                     value = "Value", -altmetric_score)
+
+ggplot(AltCG_untidy, aes(Value, altmetric_score))+
+  facet_wrap(~Variable, scales = "free_x")+
+  geom_point()+
+  geom_smooth()+
+  geom_smooth(method = "lm", col = "red")+
+  theme_bw()
+
+ggplot(AltCG_untidy, aes(Value, altmetric_score))+
+  facet_wrap(~Variable, scales = "free_x")+
+  geom_point()+
+  geom_smooth()+
+  geom_smooth(method = "lm", col = "red")+
+  scale_y_log10(limits=c(-1,1000))+
+  theme_bw()
+```
+
+## Ranking predictor variables based on estimated importance
+```{r,fig.height=4,fig.width=5,dpi=200, message=FALSE,warning=FALSE}
+#Data imputation: In this case we use a machine learning algorithm to impute missing values
+## ----- Because we select only continuous variables we impute them with a regression algorithm
+imputeMethod<-imputeLearner("regr.rpart") # Selecting rpart decision tree algorithm
+#imputeLearner("classif.rpart") for categorical variables?
+WoSimp<-impute(as.data.frame(AltCGcont),
+               classes = list(numeric = imputeMethod))
+
+#Defining our task and learner
+WoStask<-makeRegrTask(data = WoSimp$data, target = "altmetric_score")
+lin<-makeLearner("regr.lm")
+
+#Using filter for feature selection
+library(randomForestSRC)
+filterVals<-generateFilterValuesData(WoStask,
+                                     method = "randomForestSRC_importance")
+filterVals$data[,1]<-c("Year of publication","Research area diversity","Country diversity","Commodity diversity","Flagship diversity","Activity diversity","Team size","Institutional diversity","Geographic diversity","Local collaboration","Helicopter index","Women co-authors","Gender index")
+plotFilterValues(filterVals)+
+  ylab("Random forest importance")+
+  theme(axis.text.x = element_text(angle = 60,vjust = 0.95, hjust = 1))
+
+filterVals1<-generateFilterValuesData(WoStask,                                      method = "linear.correlation")
+filterVals1$data[,1]<-c("Year of publication","Research area diversity","Country diversity","Commodity diversity","Flagship diversity","Activity diversity","Team size","Institutional diversity","Geographic diversity","Local collaboration","Helicopter index","Women co-authors","Gender index")
+
+plotFilterValues(filterVals1)+
+  ylab("Pearson correlation coefficient")+
+  theme(axis.text.x = element_text(angle = 60,vjust = 0.95, hjust = 1))
+```
+
+## Filtering most important predictors: long way to do it
+```{r, message=FALSE,warning=FALSE}
+#Creating a filter wrapper
+filterWrapper = makeFilterWrapper(learner = lin,
+                                  fw.method = "linear.correlation")
+filterWrapper1<-makeFilterWrapper(learner = lin,
+                                  fw.method = "randomForestSRC_importance")
+
+#Tuning the number of predictors to retain
+lmParamSpace<-makeParamSet(
+  makeIntegerParam("fw.abs", lower = 1, upper = 13)
+)
+gridSearch<-makeTuneControlGrid()
+kFold<-makeResampleDesc("CV", iters=10)
+tunedFeats<-tuneParams(filterWrapper, task = WoStask, resampling = kFold,
+                       par.set = lmParamSpace, control = gridSearch)
+tunedFeats
+#saveRDS(tunedFeats, file = "feature_selection_randomForestSRC_importance.rds")
+
+#Training the model with filtered features
+filteredTask<-filterFeatures(WoStask, fval = filterVals,
+                             abs = unlist(tunedFeats$x))
+
+filteredModel<-train(lin, filteredTask)
+```
+
+## Wrapper method for feature selection: short-way but may be computationally expensive
+```{r, message=FALSE}
+##This use a wrapper method that select variables
+# I like this method since include the model to make a decision on which variables to consider to be important
+featSelControl<-makeFeatSelControlSequential(method = "sfbs")#I used the sequential search backward selection
+selFeats<-selectFeatures(learner = lin, task = WoStask,
+                         resampling = kFold, control = featSelControl)
+selFeats #Compare results with last feature selection, 
+#If mse.test.mean is smaller, the model found a better fit
+
+```
+
+```{r}
+## Using a wrapper method for feature selection
+WosSelFeat<-WoSimp$data[,c("altmetric_score",selFeats$x)]
+WosSelFeatTask<-makeRegrTask(data = WosSelFeat, target = "altmetric_score")
+wrapperModel<-train(lin, WosSelFeatTask)
+
+## Combining imputation and feature selection wrappers
+imputeMethod<-imputeLearner("regr.rpart")
+imputeWrapper<-makeImputeWrapper(lin,
+                                 classes = list(numeric = imputeMethod))
+featSelWrapper<-makeFeatSelWrapper(learner = imputeWrapper,
+                                   resampling = kFold,
+                                   control = featSelControl)
+
+## Cross-validating the model-building process
+library(parallel)
+library(parallelMap)
+
+WoSTaskWithNAs<-makeRegrTask(data = AltCGcont, target = "altmetric_score")
+kFold3<-makeResampleDesc("CV", iters =3)
+
+parallelStartSocket(cpus = detectCores())
+lmCV<-resample(featSelWrapper, WoSTaskWithNAs, resampling = kFold3)
+parallelStop()
+
+lmCV
+```
+
+## Interpretation of the model
+```{r,fig.height=5,fig.width=7,dpi=250}
+wrapperModelData<-getLearnerModel(wrapperModel)
+summary(wrapperModelData)
+
+par(mfrow = c(2,2))
+plot(wrapperModelData)
+par(mfrow = c(1,1))
+```
+
