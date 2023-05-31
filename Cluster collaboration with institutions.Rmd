@@ -1,0 +1,136 @@
+---
+title: "Networks of clusters of activity and institutions in the CGIAR research programs on the GLDC and RTB"
+author: "Aaron Plex"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 2
+    toc_float: TRUE
+    number_sections: TRUE
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Uploading data
+
+```{r, message=FALSE, warning=FALSE}
+library(igraph)
+library(readxl)
+library(viridis)
+library(tidyverse)
+
+author.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "Authors_list")
+colnames(author.list)<-c("UID_JA","Name","Organization","Country","PredictedGender","GenderAccuracy")
+author.list<-as.data.frame(author.list)
+
+journal.list<- read_excel("Dataset_INA_V18_Sept_2021.xlsx", sheet = "JA_list")
+
+cluster.list<-journal.list%>%
+  dplyr::select(UID_JA, AR_Year, CRP, Cluster_of_Activity_Acronym)%>%
+  rename(cluster_acronym=Cluster_of_Activity_Acronym)%>%
+  mutate(cluster_acronym=strsplit(cluster_acronym,","))%>%
+  unnest(cluster_acronym)
+unique_clusters<-as.matrix(unique(cluster.list$cluster_acronym))
+
+## GLDC edgelist
+GLDC_institutions<-author.list%>%
+  dplyr::select(UID_JA, Organization)%>%
+  filter(UID_JA>721)
+GLDC_clusters<-cluster.list%>%
+  filter(CRP=="GLDC")%>%
+  filter(AR_Year!=2021)
+GLDC_edgelist<-merge(GLDC_institutions, GLDC_clusters, 
+                     by = 'UID_JA', all.y = TRUE)%>%
+  dplyr::select(Organization, cluster_acronym)%>%
+  group_by(Organization, cluster_acronym)%>%
+  summarise(Collaboration=length(Organization))%>%
+  filter(cluster_acronym!="NA")
+  
+GLDC_nodelist1<-as.data.frame(unique(GLDC_edgelist$Organization))%>%
+  mutate(type="Institution")
+colnames(GLDC_nodelist1)[1]<-"Node"
+GLDC_nodelist2<-as.data.frame(unique(GLDC_edgelist$cluster_acronym))%>%
+  mutate(type="Cluster")
+colnames(GLDC_nodelist2)[1]<-"Node"
+GLDC_nodelist<-rbind(GLDC_nodelist1, GLDC_nodelist2)
+
+## RTB edgelist
+RTB_institutions<-author.list%>%
+  dplyr::select(UID_JA, Organization)%>%
+  filter(UID_JA<723)
+RTB_clusters<-cluster.list%>%
+  filter(CRP=="RTB")%>%
+  filter(AR_Year!=2021)
+RTB_edgelist<-merge(RTB_institutions, RTB_clusters, 
+                     by = 'UID_JA', all.y = TRUE)%>%
+  dplyr::select(Organization, cluster_acronym)%>%
+  group_by(Organization, cluster_acronym)%>%
+  summarise(Collaboration=length(Organization))%>%
+  filter(cluster_acronym!="NA")
+
+RTB_nodelist1<-as.data.frame(unique(RTB_edgelist$Organization))%>%
+  mutate(type="Institution")
+colnames(RTB_nodelist1)[1]<-"Node"
+RTB_nodelist2<-as.data.frame(unique(RTB_edgelist$cluster_acronym))%>%
+  mutate(type="Cluster")
+colnames(RTB_nodelist2)[1]<-"Node"
+RTB_nodelist<-rbind(RTB_nodelist1, RTB_nodelist2)
+```
+
+
+```{r}
+# Network of collaboration between researched countries and affiliated country
+GLDCnet<-graph_from_data_frame(d=data.frame(GLDC_edgelist),
+                                    vertices = data.frame(GLDC_nodelist),
+                                    directed = FALSE)
+RTBnet<-graph_from_data_frame(d=data.frame(RTB_edgelist),
+                                    vertices = data.frame(RTB_nodelist),
+                                    directed = FALSE)
+```
+
+
+## GLDC collaboration network between Clusters and institutions
+```{r, fig.width=6, fig.height=6, dpi=400}
+library(ggraph)
+
+V(GLDCnet)$Strength<-(igraph::strength(GLDCnet, mode = "all"))
+V(GLDCnet)$Degree<-igraph::degree(GLDCnet)
+
+GLDCgraph<-ggraph(GLDCnet)+
+  geom_edge_link(aes(edge_width=log(1+Collaboration)), colour="#b3b3b3")+
+  geom_node_point(aes(size=Strength, color=type))+
+  geom_node_text(aes(label=ifelse(V(GLDCnet)$type=="Cluster", V(GLDCnet)$name, NA),
+                     size = 7),
+                 repel = TRUE)+
+  scale_color_viridis(name = "Node type", discrete = TRUE, option = "inferno", begin = 0.3, end = 0.8)+
+  scale_edge_width_continuous(name = "Collaborations", range = c(0.05,0.8))+
+  scale_size(name = "Node strength")+
+  theme_void()
+GLDCgraph
+```
+
+## RTB collaboration network between Clusters and institutions
+```{r, fig.width=6, fig.height=6, dpi=400}
+V(RTBnet)$Strength<-(igraph::strength(RTBnet, mode = "all"))
+V(RTBnet)$Degree<-igraph::degree(RTBnet)
+
+RTBgraph<-ggraph(RTBnet)+
+  geom_edge_link(aes(edge_width=log(1+Collaboration)), colour="#b3b3b3")+
+  geom_node_point(aes(size=Strength, color=type))+
+  geom_node_text(aes(label=ifelse(V(RTBnet)$type=="Cluster", V(RTBnet)$name, NA),
+                     size = 7),
+                 repel = TRUE)+
+  scale_color_viridis(name = "Node type", discrete = TRUE, option = "rocket", begin = 0.3, end = 0.8)+
+  scale_edge_width_continuous(name = "Collaborations", range = c(0.05,0.6))+
+  scale_size(name = "Node strength")+
+  theme_void()
+RTBgraph
+```
+
+
+
